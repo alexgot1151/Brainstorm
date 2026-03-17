@@ -20,6 +20,18 @@ G.FUNCS.change_search_soul_count = function(x)
 	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
 end
 
+G.FUNCS.change_search_soul_card_mode = function(x)
+	Brainstorm.SETTINGS.autoreroll.searchSoulCardModeID = x.to_key
+	Brainstorm.SETTINGS.autoreroll.searchSoulCardMode = Brainstorm.SearchSoulCardModeList[x.to_val]
+	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
+end
+
+G.FUNCS.change_search_soul_result = function(x)
+	Brainstorm.SETTINGS.autoreroll.searchSoulResultID = x.to_key
+	Brainstorm.SETTINGS.autoreroll.searchSoulResult = Brainstorm.SearchSoulResultList[x.to_val]
+	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
+end
+
 G.FUNCS.change_seeds_per_frame = function(x)
 	Brainstorm.SETTINGS.autoreroll.seedsPerFrameID = x.to_key
 	Brainstorm.SETTINGS.autoreroll.seedsPerFrame = Brainstorm.seedsPerFrame[x.to_val]
@@ -29,6 +41,188 @@ end
 Brainstorm.AUTOREROLL.autoRerollActive = false
 Brainstorm.AUTOREROLL.rerollInterval = 0.01 -- Time interval between rerolls (in seconds)
 Brainstorm.AUTOREROLL.rerollTimer = 0
+
+local function key_is_banned(key)
+	if not key or not G or not G.GAME then return false end
+	return (G.GAME.banned_keys and G.GAME.banned_keys[key])
+		or (G.GAME.cry_banished_keys and G.GAME.cry_banished_keys[key])
+end
+
+local function center_to_key(center)
+	if type(center) == "string" then
+		return center
+	end
+	if type(center) == "table" and center.key then
+		return center.key
+	end
+	return nil
+end
+
+local function is_unavailable_center(center)
+	if center == "UNAVAILABLE" then
+		return true
+	end
+	local key = center_to_key(center)
+	return key and key_is_banned(key) or false
+end
+
+local function predict_pool_center(_type, _rarity, _legendary, _append, seed_found)
+	if not get_current_pool then return nil end
+	local _pool, _pool_key = get_current_pool(_type, _rarity, _legendary, _append)
+	if not _pool or not _pool_key then return nil end
+	local center = pseudorandom_element(_pool, Brainstorm.pseudoseed(_pool_key .. seed_found))
+	local it = 1
+	while is_unavailable_center(center) and it < 50 do
+		it = it + 1
+		center = pseudorandom_element(_pool, Brainstorm.pseudoseed(_pool_key .. "_resample" .. it .. seed_found))
+	end
+	if is_unavailable_center(center) then
+		return nil
+	end
+	return center
+end
+
+function Brainstorm.predict_legendary_from_soul(seed_found)
+	local center = predict_pool_center("Joker", nil, true, nil, seed_found)
+	if center_to_key(center) then return center_to_key(center) end
+	center = predict_pool_center("Joker", nil, true, "sou", seed_found)
+	if center_to_key(center) then return center_to_key(center) end
+	center = predict_pool_center("Joker", nil, true, "soul", seed_found)
+	return center_to_key(center)
+end
+
+local function get_fallback_tag_pool()
+	if not G then return nil end
+	local pool = {}
+	local seen = {}
+
+	if G.P_CENTER_POOLS and G.P_CENTER_POOLS.Tag then
+		for _, entry in ipairs(G.P_CENTER_POOLS.Tag) do
+			local key = center_to_key(entry)
+			if key and not seen[key] and not key_is_banned(key) then
+				seen[key] = true
+				pool[#pool + 1] = key
+			end
+		end
+	end
+	if #pool > 0 then
+		return pool
+	end
+
+	if G.P_TAGS then
+		for k, entry in pairs(G.P_TAGS) do
+			local key = center_to_key(entry)
+			if not key and type(k) == "string" then
+				key = k
+			end
+			if key and not seen[key] and not key_is_banned(key) then
+				seen[key] = true
+				pool[#pool + 1] = key
+			end
+		end
+	end
+	if #pool > 0 then
+		table.sort(pool)
+		return pool
+	end
+
+	return nil
+end
+
+function Brainstorm.predict_tag_from_seed(seed_found)
+	local center = predict_pool_center("Tag", nil, nil, nil, seed_found)
+	local key = center_to_key(center)
+	if key then
+		return key
+	end
+	local fallback_pool = get_fallback_tag_pool()
+	if fallback_pool and #fallback_pool > 0 then
+		return pseudorandom_element(fallback_pool, Brainstorm.pseudoseed("Tag1" .. seed_found))
+	end
+	return nil
+end
+
+local function get_fallback_booster_pool()
+	if not G then return nil end
+	local pool = {}
+	local seen = {}
+
+	if G.P_CENTER_POOLS and G.P_CENTER_POOLS.Booster then
+		for _, entry in ipairs(G.P_CENTER_POOLS.Booster) do
+			local key = center_to_key(entry)
+			local center = (type(entry) == "table" and entry) or (G.P_CENTERS and G.P_CENTERS[key])
+			if key and not seen[key] and not key_is_banned(key) then
+				seen[key] = true
+				pool[#pool + 1] = {
+					key = key,
+					weight = (center and center.weight) or 1,
+				}
+			end
+		end
+	end
+	if #pool > 0 then
+		return pool
+	end
+
+	if G.P_BOOSTERS then
+		local keys = {}
+		for k, _ in pairs(G.P_BOOSTERS) do
+			if type(k) == "string" then
+				keys[#keys + 1] = k
+			end
+		end
+		table.sort(keys)
+		for _, key in ipairs(keys) do
+			local entry = G.P_BOOSTERS[key]
+			local center = (type(entry) == "table" and entry) or (G.P_CENTERS and G.P_CENTERS[key])
+			local resolved_key = center_to_key(entry) or key
+			if resolved_key and not seen[resolved_key] and not key_is_banned(resolved_key) then
+				seen[resolved_key] = true
+				pool[#pool + 1] = {
+					key = resolved_key,
+					weight = (center and center.weight) or 1,
+				}
+			end
+		end
+	end
+	if #pool > 0 then
+		return pool
+	end
+
+	return nil
+end
+
+local function weighted_pick_booster(pool, seed_found)
+	local cume = 0
+	for _, entry in ipairs(pool) do
+		cume = cume + (entry.weight or 1)
+	end
+	if cume <= 0 then
+		return nil
+	end
+	local poll = pseudorandom(Brainstorm.pseudoseed("shop_pack1" .. seed_found)) * cume
+	local it = 0
+	for _, entry in ipairs(pool) do
+		it = it + (entry.weight or 1)
+		if it >= poll and it - (entry.weight or 1) <= poll then
+			return entry.key
+		end
+	end
+	return nil
+end
+
+function Brainstorm.predict_booster_from_seed(seed_found)
+	local center = predict_pool_center("Booster", nil, nil, "sho", seed_found)
+	local key = center_to_key(center)
+	if key then
+		return key
+	end
+	local fallback_pool = get_fallback_booster_pool()
+	if fallback_pool and #fallback_pool > 0 then
+		return weighted_pick_booster(fallback_pool, seed_found)
+	end
+	return nil
+end
 
 function FastReroll()
 	G.GAME.viewed_back = nil
@@ -69,40 +263,55 @@ function Brainstorm.auto_reroll()
 			hashed_seed = pseudohash(seed_found),
 		}
 		if Brainstorm.SETTINGS.autoreroll.searchTag ~= "" then
-			_tag = pseudorandom_element(G.P_CENTER_POOLS["Tag"], Brainstorm.pseudoseed("Tag1" .. seed_found)).key
-			if _tag ~= Brainstorm.SETTINGS.autoreroll.searchTag then
+			if key_is_banned(Brainstorm.SETTINGS.autoreroll.searchTag) then
 				seed_found = nil
+			else
+				local predicted_tag = Brainstorm.predict_tag_from_seed(seed_found)
+				if predicted_tag ~= Brainstorm.SETTINGS.autoreroll.searchTag then
+					seed_found = nil
+				end
 			end
 		end
 		if seed_found and Brainstorm.SETTINGS.autoreroll.searchForSoul then
-			-- Check if arcana pack from skip has The Soul
+			local soul_mode = Brainstorm.SETTINGS.autoreroll.searchSoulCardMode or "soul_only"
+			local target_legendary = Brainstorm.SETTINGS.autoreroll.searchSoulResult or ""
+			-- Check if Arcana has The Soul and optionally match Cryptid Gateway logic
 			for i = 1, Brainstorm.SETTINGS.autoreroll.searchForSoul do
-				local soul_found = false
-				for i = 1, 5 do
-					if pseudorandom(Brainstorm.pseudoseed("soul_Tarot1" .. seed_found)) > 0.997 then
-						soul_found = true
+				local card_found = false
+				for j = 1, 5 do
+					local soul_found = pseudorandom(Brainstorm.pseudoseed("soul_Tarot1" .. seed_found)) > 0.997
+					local gateway_found = false
+					if soul_mode ~= "soul_only" then
+						gateway_found = pseudorandom(Brainstorm.pseudoseed("soul_Spectral1" .. seed_found)) > 0.997
 					end
+					if soul_mode == "soul_only" then
+						card_found = soul_found
+					elseif soul_mode == "gateway_only" then
+						card_found = gateway_found
+					else
+						card_found = soul_found or gateway_found
+					end
+					if card_found and target_legendary ~= "" then
+						if soul_mode == "gateway_only" then
+							card_found = false
+						else
+							local predicted_legendary = Brainstorm.predict_legendary_from_soul(seed_found)
+							card_found = predicted_legendary == target_legendary
+						end
+					end
+					if card_found then break end
 				end
-				if not soul_found then
+				if not card_found then
 					seed_found = nil
 					break
 				end
 			end
 		end
 		if seed_found and Brainstorm.SETTINGS.autoreroll.searchPack and #Brainstorm.SETTINGS.autoreroll.searchPack > 0 then
-		    local cume, it, center = 0, 0, nil
-			for k, v in ipairs(G.P_CENTER_POOLS['Booster']) do
-				if (not _type or _type == v.kind) then cume = cume + (v.weight or 1 ) end
-			end
-			local poll = pseudorandom(Brainstorm.pseudoseed("shop_pack1"..seed_found))*cume
-			for k, v in ipairs(G.P_CENTER_POOLS['Booster']) do
-				if not _type or _type == v.kind then it = it + (v.weight or 1) end
-				if it >= poll and it - (v.weight or 1) <= poll then center = v
-break end
-			end
+			local predicted_pack = Brainstorm.predict_booster_from_seed(seed_found)
 			local pack_found = false
 			for i = 1, #Brainstorm.SETTINGS.autoreroll.searchPack do
-				if Brainstorm.SETTINGS.autoreroll.searchPack[i] == center.key then
+				if predicted_pack and Brainstorm.SETTINGS.autoreroll.searchPack[i] == predicted_pack then
 					pack_found = true
 					break
 				end
