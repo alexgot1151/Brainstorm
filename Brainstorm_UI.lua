@@ -33,7 +33,7 @@ Brainstorm.seedsPerFrame = {
 
 local searchPackSlotKeys = {"Shop 1", "Shop 2"}
 local searchSoulCardModeKeys = {"Soul Only", "Soul or Gateway (Cryptid)", "Gateway Only (Cryptid)"}
-local seedsPerFrame = {"500", "750", "1000"}
+local seedsPerFrame = {"500", "750", "1000", "2500", "5000", "10000"}
 -- print(Brainstorm.FUNCS.inspect(searchTagKeys))
 
 local function normalize_pool_center(entry)
