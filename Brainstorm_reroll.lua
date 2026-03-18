@@ -9,9 +9,21 @@ G.FUNCS.change_search_tag = function(x)
 	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
 end
 
+G.FUNCS.change_search_voucher = function(x)
+	Brainstorm.SETTINGS.autoreroll.searchVoucherID = x.to_key
+	Brainstorm.SETTINGS.autoreroll.searchVoucher = Brainstorm.SearchVoucherList[x.to_val]
+	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
+end
+
 G.FUNCS.change_search_pack = function(x)
 	Brainstorm.SETTINGS.autoreroll.searchPackID = x.to_key
 	Brainstorm.SETTINGS.autoreroll.searchPack = Brainstorm.SearchPackList[x.to_val]
+	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
+end
+
+G.FUNCS.change_search_pack_slot = function(x)
+	Brainstorm.SETTINGS.autoreroll.searchPackShopSlotID = x.to_key
+	Brainstorm.SETTINGS.autoreroll.searchPackShopSlot = Brainstorm.SearchPackSlotList[x.to_val]
 	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
 end
 
@@ -142,6 +154,58 @@ function Brainstorm.predict_tag_from_seed(seed_found)
 	return nil
 end
 
+local function get_fallback_voucher_pool()
+	if not G then return nil end
+	local pool = {}
+	local seen = {}
+
+	if G.P_CENTER_POOLS and G.P_CENTER_POOLS.Voucher then
+		for _, entry in ipairs(G.P_CENTER_POOLS.Voucher) do
+			local key = center_to_key(entry)
+			if key and not seen[key] and not key_is_banned(key) then
+				seen[key] = true
+				pool[#pool + 1] = key
+			end
+		end
+	end
+	if #pool > 0 then
+		table.sort(pool)
+		return pool
+	end
+
+	if G.P_VOUCHERS then
+		for k, entry in pairs(G.P_VOUCHERS) do
+			local key = center_to_key(entry)
+			if not key and type(k) == "string" then
+				key = k
+			end
+			if key and not seen[key] and not key_is_banned(key) then
+				seen[key] = true
+				pool[#pool + 1] = key
+			end
+		end
+	end
+	if #pool > 0 then
+		table.sort(pool)
+		return pool
+	end
+
+	return nil
+end
+
+function Brainstorm.predict_voucher_from_seed(seed_found)
+	local center = predict_pool_center("Voucher", nil, nil, nil, seed_found)
+	local key = center_to_key(center)
+	if key then
+		return key
+	end
+	local fallback_pool = get_fallback_voucher_pool()
+	if fallback_pool and #fallback_pool > 0 then
+		return pseudorandom_element(fallback_pool, Brainstorm.pseudoseed("Voucher1" .. seed_found))
+	end
+	return nil
+end
+
 local function get_fallback_booster_pool()
 	if not G then return nil end
 	local pool = {}
@@ -192,7 +256,7 @@ local function get_fallback_booster_pool()
 	return nil
 end
 
-local function weighted_pick_booster(pool, seed_found)
+local function weighted_pick_booster(pool, seed_found, pack_slot)
 	local cume = 0
 	for _, entry in ipairs(pool) do
 		cume = cume + (entry.weight or 1)
@@ -200,7 +264,8 @@ local function weighted_pick_booster(pool, seed_found)
 	if cume <= 0 then
 		return nil
 	end
-	local poll = pseudorandom(Brainstorm.pseudoseed("shop_pack1" .. seed_found)) * cume
+	local slot = tonumber(pack_slot) or 1
+	local poll = pseudorandom(Brainstorm.pseudoseed("shop_pack" .. slot .. seed_found)) * cume
 	local it = 0
 	for _, entry in ipairs(pool) do
 		it = it + (entry.weight or 1)
@@ -211,15 +276,24 @@ local function weighted_pick_booster(pool, seed_found)
 	return nil
 end
 
-function Brainstorm.predict_booster_from_seed(seed_found)
-	local center = predict_pool_center("Booster", nil, nil, "sho", seed_found)
+function Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
+	local slot = tonumber(pack_slot) or 1
+	local center = nil
+	-- `get_current_pool` append keys are not standardized for shop slot > 1 across mod stacks.
+	-- Use explicit shop_pack<slot> weighting path for slot 2+ to keep predictions consistent.
+	if slot == 1 then
+		center = predict_pool_center("Booster", nil, nil, "sho", seed_found)
+		if not center then
+			center = predict_pool_center("Booster", nil, nil, nil, seed_found)
+		end
+	end
 	local key = center_to_key(center)
 	if key then
 		return key
 	end
 	local fallback_pool = get_fallback_booster_pool()
 	if fallback_pool and #fallback_pool > 0 then
-		return weighted_pick_booster(fallback_pool, seed_found)
+		return weighted_pick_booster(fallback_pool, seed_found, slot)
 	end
 	return nil
 end
@@ -272,6 +346,16 @@ function Brainstorm.auto_reroll()
 				end
 			end
 		end
+		if seed_found and Brainstorm.SETTINGS.autoreroll.searchVoucher and Brainstorm.SETTINGS.autoreroll.searchVoucher ~= "" then
+			if key_is_banned(Brainstorm.SETTINGS.autoreroll.searchVoucher) then
+				seed_found = nil
+			else
+				local predicted_voucher = Brainstorm.predict_voucher_from_seed(seed_found)
+				if predicted_voucher ~= Brainstorm.SETTINGS.autoreroll.searchVoucher then
+					seed_found = nil
+				end
+			end
+		end
 		if seed_found and Brainstorm.SETTINGS.autoreroll.searchForSoul then
 			local soul_mode = Brainstorm.SETTINGS.autoreroll.searchSoulCardMode or "soul_only"
 			local target_legendary = Brainstorm.SETTINGS.autoreroll.searchSoulResult or ""
@@ -308,10 +392,15 @@ function Brainstorm.auto_reroll()
 			end
 		end
 		if seed_found and Brainstorm.SETTINGS.autoreroll.searchPack and #Brainstorm.SETTINGS.autoreroll.searchPack > 0 then
-			local predicted_pack = Brainstorm.predict_booster_from_seed(seed_found)
+			local selected_pack_keys = Brainstorm.SETTINGS.autoreroll.searchPack
 			local pack_found = false
-			for i = 1, #Brainstorm.SETTINGS.autoreroll.searchPack do
-				if predicted_pack and Brainstorm.SETTINGS.autoreroll.searchPack[i] == predicted_pack then
+			local pack_slot = tonumber(Brainstorm.SETTINGS.autoreroll.searchPackShopSlot) or 1
+			if pack_slot < 1 or pack_slot > 2 then
+				pack_slot = 1
+			end
+			local predicted_pack = Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
+			for i = 1, #selected_pack_keys do
+				if predicted_pack and selected_pack_keys[i] == predicted_pack then
 					pack_found = true
 					break
 				end

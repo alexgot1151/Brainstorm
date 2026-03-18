@@ -28,8 +28,12 @@ local DEFAULT_SETTINGS = {
 		searchSoulCardMode = "soul_only",
 		searchSoulResultID = 1,
 		searchSoulResult = "",
+		searchVoucher = "",
 		searchPack = { "p_spectral_mega_1" },
+		searchPackShopSlotID = 1,
+		searchPackShopSlot = 1,
 		searchTag = "tag_charm",
+		searchVoucherID = 1,
 		seedsPerFrameID = 3,
 		seedsPerFrame = 1000,
 		searchPackID = 21,
@@ -62,4 +66,3 @@ function initBrainstorm()
 	nativefs.write(lovely.mod_dir .. "/Brainstorm/settings.lua", STR_PACK(Brainstorm.SETTINGS))
   _RELEASE_MODE = not Brainstorm.SETTINGS.debug_mode
 end
-

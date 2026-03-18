@@ -6,9 +6,16 @@ local nativefs = require("nativefs")
 Brainstorm.SearchTagList = {
 	["None"] = "",
 }
+Brainstorm.SearchVoucherList = {
+	["None"] = "",
+}
 
 Brainstorm.SearchPackList = {
 	["None"] = {},
+}
+Brainstorm.SearchPackSlotList = {
+	["Shop 1"] = 1,
+	["Shop 2"] = 2,
 }
 Brainstorm.SearchSoulCardModeList = {
 	["Soul Only"] = "soul_only",
@@ -24,6 +31,7 @@ Brainstorm.seedsPerFrame = {
     ["1000"] = 1000,
 }
 
+local searchPackSlotKeys = {"Shop 1", "Shop 2"}
 local searchSoulCardModeKeys = {"Soul Only", "Soul or Gateway (Cryptid)", "Gateway Only (Cryptid)"}
 local seedsPerFrame = {"500", "750", "1000"}
 -- print(Brainstorm.FUNCS.inspect(searchTagKeys))
@@ -127,6 +135,92 @@ local function infer_pack_size_label(key)
 	return nil
 end
 
+local function log_pack_pool_diagnostics(raw_entries, deduped_entries)
+	if not Brainstorm.SETTINGS or not Brainstorm.SETTINGS.debug_mode then
+		return
+	end
+
+	local function inc(map, key)
+		map[key] = (map[key] or 0) + 1
+	end
+
+	local function sorted_duplicate_items(map)
+		local items = {}
+		for key, count in pairs(map) do
+			if count > 1 then
+				items[#items + 1] = {key = key, count = count}
+			end
+		end
+		table.sort(items, function(a, b)
+			if a.count == b.count then
+				return a.key < b.key
+			end
+			return a.count > b.count
+		end)
+		return items
+	end
+
+	local source_counts = {}
+	local key_counts = {}
+	local label_counts = {}
+	local base_key_counts = {}
+	local base_label_counts = {}
+	for _, entry in ipairs(raw_entries) do
+		inc(source_counts, entry.source or "unknown")
+		inc(key_counts, entry.key or "nil")
+		inc(label_counts, entry.label or "nil")
+		if (entry.mod_id or "base") == "base" then
+			inc(base_key_counts, entry.key or "nil")
+			inc(base_label_counts, entry.label or "nil")
+		end
+	end
+
+	local lines = {}
+	lines[#lines + 1] = "Brainstorm Pack Pool Diagnostics"
+	lines[#lines + 1] = "raw_entries=" .. tostring(#raw_entries) .. ", deduped_entries=" .. tostring(#deduped_entries)
+	lines[#lines + 1] = "source_counts:"
+	for source, count in pairs(source_counts) do
+		lines[#lines + 1] = "  " .. source .. ": " .. tostring(count)
+	end
+
+	local dup_all_keys = sorted_duplicate_items(key_counts)
+	local dup_base_keys = sorted_duplicate_items(base_key_counts)
+	local dup_all_labels = sorted_duplicate_items(label_counts)
+	local dup_base_labels = sorted_duplicate_items(base_label_counts)
+
+	lines[#lines + 1] = "duplicate_keys_all(" .. tostring(#dup_all_keys) .. "):"
+	for _, item in ipairs(dup_all_keys) do
+		lines[#lines + 1] = "  [" .. tostring(item.count) .. "] " .. tostring(item.key)
+	end
+	lines[#lines + 1] = "duplicate_keys_base_only(" .. tostring(#dup_base_keys) .. "):"
+	for _, item in ipairs(dup_base_keys) do
+		lines[#lines + 1] = "  [" .. tostring(item.count) .. "] " .. tostring(item.key)
+	end
+
+	lines[#lines + 1] = "duplicate_labels_all(" .. tostring(#dup_all_labels) .. "):"
+	for _, item in ipairs(dup_all_labels) do
+		lines[#lines + 1] = "  [" .. tostring(item.count) .. "] " .. tostring(item.key)
+	end
+	lines[#lines + 1] = "duplicate_labels_base_only(" .. tostring(#dup_base_labels) .. "):"
+	for _, item in ipairs(dup_base_labels) do
+		lines[#lines + 1] = "  [" .. tostring(item.count) .. "] " .. tostring(item.key)
+	end
+
+	lines[#lines + 1] = "raw_entries_detail:"
+	for _, entry in ipairs(raw_entries) do
+		lines[#lines + 1] =
+			"  source=" .. tostring(entry.source)
+			.. " | mod=" .. tostring(entry.mod_id)
+			.. " | kind=" .. tostring(entry.kind)
+			.. " | key=" .. tostring(entry.key)
+			.. " | label=" .. tostring(entry.label)
+	end
+
+	local log_path = lovely.mod_dir .. "/pack_pool_debug.log"
+	nativefs.write(log_path, table.concat(lines, "\n"))
+	print("[Brainstorm] Pack diagnostics saved: " .. log_path)
+end
+
 local function build_pack_keys()
 	Brainstorm.SearchPackList = {
 		["None"] = {},
@@ -136,8 +230,17 @@ local function build_pack_keys()
 	if G then
 		local boosters = {}
 		local seen = {}
-		local function add_entries(entries)
+		local raw_entries = {}
+		local function add_entries(entries, source_name)
 			for _, entry in ipairs(entries) do
+				local center = entry.center or (G and G.P_CENTERS and G.P_CENTERS[entry.key])
+				raw_entries[#raw_entries + 1] = {
+					source = source_name,
+					key = entry.key,
+					label = tostring((center and center.name) or entry.key),
+					kind = tostring((center and center.kind) or "Other"),
+					mod_id = (center and center.mod and center.mod.id) or "base",
+				}
 				if not seen[entry.key] then
 					seen[entry.key] = true
 					boosters[#boosters + 1] = entry
@@ -145,10 +248,10 @@ local function build_pack_keys()
 			end
 		end
 		if G.P_CENTER_POOLS and G.P_CENTER_POOLS.Booster then
-			add_entries(collect_pool_centers(G.P_CENTER_POOLS.Booster))
+			add_entries(collect_pool_centers(G.P_CENTER_POOLS.Booster), "G.P_CENTER_POOLS.Booster")
 		end
 		if G.P_BOOSTERS then
-			add_entries(collect_pool_centers(G.P_BOOSTERS))
+			add_entries(collect_pool_centers(G.P_BOOSTERS), "G.P_BOOSTERS")
 		end
 
 		local by_kind = {}
@@ -210,20 +313,35 @@ local function build_pack_keys()
 			end
 		end
 
-		table.sort(singles, function(a, b)
-			if a.label == b.label then
-				return a.key < b.key
-			end
-			return a.label < b.label
-		end)
+		-- Collapse identical display labels into a single selectable entry.
+		local singles_by_label = {}
 		for _, entry in ipairs(singles) do
-			local label = entry.label
-			if Brainstorm.SearchPackList[label] ~= nil then
-				label = entry.label .. " (" .. entry.key .. ")"
+			if not singles_by_label[entry.label] then
+				singles_by_label[entry.label] = {}
 			end
-			Brainstorm.SearchPackList[label] = {entry.key}
+			singles_by_label[entry.label][#singles_by_label[entry.label] + 1] = entry.key
+		end
+		local single_labels = {}
+		for label, _ in pairs(singles_by_label) do
+			single_labels[#single_labels + 1] = label
+		end
+		table.sort(single_labels)
+		for _, base_label in ipairs(single_labels) do
+			local pack_keys = singles_by_label[base_label]
+			table.sort(pack_keys)
+			local label = base_label
+			if Brainstorm.SearchPackList[label] ~= nil then
+				if #pack_keys == 1 then
+					label = base_label .. " (" .. pack_keys[1] .. ")"
+				else
+					label = base_label .. " (" .. tostring(#pack_keys) .. " variants)"
+				end
+			end
+			Brainstorm.SearchPackList[label] = copy_key_list(pack_keys)
 			keys[#keys + 1] = label
 		end
+
+		log_pack_pool_diagnostics(raw_entries, boosters)
 	end
 
 	local current = Brainstorm.SETTINGS.autoreroll.searchPack or {}
@@ -315,6 +433,69 @@ local function build_tag_keys()
 	return keys, current_id
 end
 
+local function build_voucher_keys()
+	Brainstorm.SearchVoucherList = {
+		["None"] = "",
+	}
+	local keys = {"None"}
+	if G then
+		local vouchers = {}
+		local seen = {}
+		local function add_voucher_entries(entries)
+			for _, entry in ipairs(entries) do
+				if not seen[entry.key] then
+					seen[entry.key] = true
+					local label = entry.key
+					if entry.center and entry.center.name then
+						label = entry.center.name
+					elseif G and G.P_CENTERS and G.P_CENTERS[entry.key] and G.P_CENTERS[entry.key].name then
+						label = G.P_CENTERS[entry.key].name
+					end
+					label = tostring(label)
+					vouchers[#vouchers + 1] = {label = label, key = entry.key}
+				end
+			end
+		end
+		if G.P_CENTER_POOLS and G.P_CENTER_POOLS.Voucher then
+			add_voucher_entries(collect_pool_centers(G.P_CENTER_POOLS.Voucher))
+		end
+		if G.P_VOUCHERS then
+			add_voucher_entries(collect_pool_centers(G.P_VOUCHERS))
+		end
+		table.sort(vouchers, function(a, b)
+			if a.label == b.label then
+				return a.key < b.key
+			end
+			return a.label < b.label
+		end)
+		for _, entry in ipairs(vouchers) do
+			local label = entry.label
+			if Brainstorm.SearchVoucherList[label] ~= nil then
+				label = entry.label .. " (" .. entry.key .. ")"
+			end
+			Brainstorm.SearchVoucherList[label] = entry.key
+			keys[#keys + 1] = label
+		end
+	end
+
+	local current = Brainstorm.SETTINGS.autoreroll.searchVoucher or ""
+	local current_id = 1
+	for i, label in ipairs(keys) do
+		if Brainstorm.SearchVoucherList[label] == current then
+			current_id = i
+			break
+		end
+	end
+	if current ~= "" and current_id == 1 then
+		local extra_label = "Current (" .. current .. ")"
+		Brainstorm.SearchVoucherList[extra_label] = current
+		keys[#keys + 1] = extra_label
+		current_id = #keys
+	end
+
+	return keys, current_id
+end
+
 local function build_soul_result_keys()
 	Brainstorm.SearchSoulResultList = {
 		["Any Legendary"] = "",
@@ -363,6 +544,7 @@ local ct = create_tabs
 function create_tabs(args)
 	if args and args.tab_h == 7.05 then
 		local searchTagKeys, searchTagID = build_tag_keys()
+		local searchVoucherKeys, searchVoucherID = build_voucher_keys()
 		local searchPackKeys, searchPackID = build_pack_keys()
 		local searchSoulResultKeys, searchSoulResultID = build_soul_result_keys()
 		args.tabs[#args.tabs + 1] = {
@@ -394,12 +576,28 @@ function create_tabs(args)
 							current_option = searchTagID,
 						}),
 						create_option_cycle({
+							label = "AutoReroll Search Voucher",
+							scale = 0.8,
+							w = 4,
+							options = searchVoucherKeys,
+							opt_callback = "change_search_voucher",
+							current_option = searchVoucherID,
+						}),
+						create_option_cycle({
 							label = "AutoReroll Search Pack",
 							scale = 0.8,
 							w = 4,
 							options = searchPackKeys,
 							opt_callback = "change_search_pack",
 							current_option = searchPackID,
+						}),
+						create_option_cycle({
+							label = "AutoReroll Pack Shop Slot",
+							scale = 0.8,
+							w = 4,
+							options = searchPackSlotKeys,
+							opt_callback = "change_search_pack_slot",
+							current_option = Brainstorm.SETTINGS.autoreroll.searchPackShopSlotID or 1,
 						}),
 						create_option_cycle({
 							label = "Charm Tag/Arcana Pack: Number of Souls",
