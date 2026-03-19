@@ -306,16 +306,23 @@ local function get_weighted_shop_booster_pool()
 	return get_fallback_booster_pool()
 end
 
-function Brainstorm.build_pack_prediction_context()
+function Brainstorm.build_pack_prediction_context(assume_fresh_run)
 	local pool = get_weighted_shop_booster_pool()
 	if not pool or #pool == 0 then
 		return nil
 	end
-	local ante = (G and G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante) or 1
+	local ante = 1
+	if not assume_fresh_run then
+		ante = (G and G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante) or 1
+	end
+	local forced_first_buffoon = not key_is_banned("p_buffoon_normal_1")
+	if not assume_fresh_run then
+		forced_first_buffoon = G and G.GAME and (not G.GAME.first_shop_buffoon) and not key_is_banned("p_buffoon_normal_1")
+	end
 	return {
 		pool = pool,
 		shop_pack_seed_key = "shop_pack" .. tostring(ante),
-		forced_first_buffoon = G and G.GAME and (not G.GAME.first_shop_buffoon) and not key_is_banned("p_buffoon_normal_1"),
+		forced_first_buffoon = forced_first_buffoon,
 	}
 end
 
@@ -410,7 +417,8 @@ local function auto_reroll_impl()
 		if next(selected_pack_keys) == nil then
 			return nil
 		end
-		pack_prediction_context = Brainstorm.build_pack_prediction_context()
+		-- Auto-reroll searches for a fresh run seed; pack RNG should be evaluated as ante-1 first shop.
+		pack_prediction_context = Brainstorm.build_pack_prediction_context(true)
 		if not pack_prediction_context then
 			return nil
 		end
@@ -420,6 +428,12 @@ local function auto_reroll_impl()
 			and not selected_pack_keys["p_buffoon_normal_1"]
 			and not selected_pack_keys["p_buffoon_normal_2"]
 		then
+			if Brainstorm.log_debug then
+				Brainstorm.log_debug(
+					"Pack filter impossible for Shop 1 on fresh run: first shop is forced Buffoon unless banned.",
+					true
+				)
+			end
 			return nil
 		end
 	end
