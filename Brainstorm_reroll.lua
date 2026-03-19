@@ -359,7 +359,7 @@ function FastReroll()
 	G:start_run({ stake = _stake, seed = _seed, challenge = _challenge })
 end
 
-function Brainstorm.auto_reroll()
+local function auto_reroll_impl()
 	local rerollsThisFrame = 0
 	-- This part is meant to mimic how Balatro rerolls for Gold Stake
 	local extra_num = -0.561892350821
@@ -486,6 +486,22 @@ function Brainstorm.auto_reroll()
 		G.GAME.seeded = false
 	end
 	return seed_found
+end
+
+function Brainstorm.auto_reroll()
+	if Brainstorm.safe_call_result then
+		local ok, seed_found = Brainstorm.safe_call_result("Brainstorm.auto_reroll", auto_reroll_impl)
+		if not ok then
+			if Brainstorm.AUTOREROLL then
+				Brainstorm.AUTOREROLL.autoRerollActive = false
+				Brainstorm.AUTOREROLL.autoRerollFrames = 0
+				Brainstorm.AUTOREROLL.rerollTimer = 0
+			end
+			return nil
+		end
+		return seed_found
+	end
+	return auto_reroll_impl()
 end
 
 function Brainstorm.searchParametersMet()

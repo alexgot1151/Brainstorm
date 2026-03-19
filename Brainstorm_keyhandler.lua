@@ -43,7 +43,7 @@ local function load_state_from_slot(k)
 	saveManagerAlert("Loaded save from slot [" .. k .. "]")
 end
 
-function Brainstorm.key_press_update(key)
+local function key_press_update_impl(key)
 	if not key or not Brainstorm.SETTINGS or not Brainstorm.SETTINGS.keybinds then
 		return
 	end
@@ -108,4 +108,15 @@ function Brainstorm.key_press_update(key)
 			saveManagerAlert("AutoReroll stopped [Ctrl+P]")
 		end
 	end
+end
+
+function Brainstorm.key_press_update(key)
+	if Brainstorm.safe_call_result then
+		local ok = Brainstorm.safe_call_result("Brainstorm.key_press_update", key_press_update_impl, key)
+		if not ok and Brainstorm.log_debug then
+			Brainstorm.log_debug("Key handler disabled for this key press due to error", true)
+		end
+		return
+	end
+	return key_press_update_impl(key)
 end

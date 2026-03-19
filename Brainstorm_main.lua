@@ -3,13 +3,13 @@ local nativefs = require("nativefs")
 Brainstorm.INITIALIZED = true
 Brainstorm.VER = "Brainstorm v1.1.0-alpha"
 
-function Brainstorm.update(dt)
+local function update_impl(dt)
 	if Brainstorm.AUTOREROLL.autoRerollActive then
 		Brainstorm.AUTOREROLL.autoRerollFrames = (Brainstorm.AUTOREROLL.autoRerollFrames or 0)
 		Brainstorm.AUTOREROLL.rerollTimer = Brainstorm.AUTOREROLL.rerollTimer + dt
 		if Brainstorm.AUTOREROLL.rerollTimer >= Brainstorm.AUTOREROLL.rerollInterval then
 			Brainstorm.AUTOREROLL.rerollTimer = Brainstorm.AUTOREROLL.rerollTimer - Brainstorm.AUTOREROLL.rerollInterval
-			seed_found = Brainstorm.auto_reroll()
+			local seed_found = Brainstorm.auto_reroll()
 			if seed_found then
 				Brainstorm.AUTOREROLL.autoRerollActive = false
 				Brainstorm.AUTOREROLL.autoRerollFrames = 0
@@ -26,6 +26,17 @@ function Brainstorm.update(dt)
 			})
 		end
 	end
+end
+
+function Brainstorm.update(dt)
+	if Brainstorm.safe_call_result then
+		local ok = Brainstorm.safe_call_result("Brainstorm.update", update_impl, dt)
+		if not ok and Brainstorm.AUTOREROLL then
+			Brainstorm.AUTOREROLL.autoRerollActive = false
+		end
+		return
+	end
+	return update_impl(dt)
 end
 
 -- HELPER FUNCTIONS

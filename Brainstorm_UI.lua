@@ -216,7 +216,7 @@ local function log_pack_pool_diagnostics(raw_entries, deduped_entries)
 			.. " | label=" .. tostring(entry.label)
 	end
 
-	local log_path = lovely.mod_dir .. "/pack_pool_debug.log"
+	local log_path = lovely.mod_dir .. "/Brainstorm/pack_pool_debug.log"
 	nativefs.write(log_path, table.concat(lines, "\n"))
 	print("[Brainstorm] Pack diagnostics saved: " .. log_path)
 end
@@ -542,120 +542,131 @@ G.FUNCS.options = function(e)
 end
 local ct = create_tabs
 function create_tabs(args)
-	if args and args.tab_h == 7.05 then
-		local searchTagKeys, searchTagID = build_tag_keys()
-		local searchVoucherKeys, searchVoucherID = build_voucher_keys()
-		local searchPackKeys, searchPackID = build_pack_keys()
-		local searchSoulResultKeys, searchSoulResultID = build_soul_result_keys()
-		args.tabs[#args.tabs + 1] = {
-			label = "Brainstorm",
-			tab_definition_function = function()
-				return {
-					n = G.UIT.ROOT,
-					config = {
-						align = "cm",
-						padding = 0.05,
-						colour = G.C.CLEAR,
-					},
-					nodes = {
-						create_toggle({
-							label = "Debug Mode",
-							ref_table = Brainstorm.SETTINGS,
-							ref_value = "debug_mode",
-							callback = function(_set_toggle)
-								_RELEASE_MODE = not Brainstorm.SETTINGS.debug_mode
-								G.F_NO_ACHIEVEMENTS = Brainstorm.SETTINGS.debug_mode
-							end,
-						}),
-						{
-							n = G.UIT.R,
-							config = { align = "tm", padding = 0 },
-							nodes = {
-								{
-									n = G.UIT.C,
-									config = { align = "tl", padding = 0.05 },
-									nodes = {
-										create_option_cycle({
-											label = "AutoReroll Search Tag",
-											scale = 0.8,
-											w = 3.8,
-											options = searchTagKeys,
-											opt_callback = "change_search_tag",
-											current_option = searchTagID,
-										}),
-										create_option_cycle({
-											label = "AutoReroll Search Voucher",
-											scale = 0.8,
-											w = 3.8,
-											options = searchVoucherKeys,
-											opt_callback = "change_search_voucher",
-											current_option = searchVoucherID,
-										}),
-										create_option_cycle({
-											label = "AutoReroll Search Pack",
-											scale = 0.8,
-											w = 3.8,
-											options = searchPackKeys,
-											opt_callback = "change_search_pack",
-											current_option = searchPackID,
-										}),
-										create_option_cycle({
-											label = "AutoReroll Pack Shop Slot",
-											scale = 0.8,
-											w = 3.8,
-											options = searchPackSlotKeys,
-											opt_callback = "change_search_pack_slot",
-											current_option = Brainstorm.SETTINGS.autoreroll.searchPackShopSlotID or 1,
-										}),
+	local function create_tabs_impl()
+		if args and args.tab_h == 7.05 then
+			local searchTagKeys, searchTagID = build_tag_keys()
+			local searchVoucherKeys, searchVoucherID = build_voucher_keys()
+			local searchPackKeys, searchPackID = build_pack_keys()
+			local searchSoulResultKeys, searchSoulResultID = build_soul_result_keys()
+			args.tabs[#args.tabs + 1] = {
+				label = "Brainstorm",
+				tab_definition_function = function()
+					return {
+						n = G.UIT.ROOT,
+						config = {
+							align = "cm",
+							padding = 0.05,
+							colour = G.C.CLEAR,
+						},
+						nodes = {
+							create_toggle({
+								label = "Debug Mode",
+								ref_table = Brainstorm.SETTINGS,
+								ref_value = "debug_mode",
+								callback = function(_set_toggle)
+									_RELEASE_MODE = not Brainstorm.SETTINGS.debug_mode
+									G.F_NO_ACHIEVEMENTS = Brainstorm.SETTINGS.debug_mode
+								end,
+							}),
+							{
+								n = G.UIT.R,
+								config = { align = "tm", padding = 0 },
+								nodes = {
+									{
+										n = G.UIT.C,
+										config = { align = "tl", padding = 0.05 },
+										nodes = {
+											create_option_cycle({
+												label = "AutoReroll Search Tag",
+												scale = 0.8,
+												w = 3.8,
+												options = searchTagKeys,
+												opt_callback = "change_search_tag",
+												current_option = searchTagID,
+											}),
+											create_option_cycle({
+												label = "AutoReroll Search Voucher",
+												scale = 0.8,
+												w = 3.8,
+												options = searchVoucherKeys,
+												opt_callback = "change_search_voucher",
+												current_option = searchVoucherID,
+											}),
+											create_option_cycle({
+												label = "AutoReroll Search Pack",
+												scale = 0.8,
+												w = 3.8,
+												options = searchPackKeys,
+												opt_callback = "change_search_pack",
+												current_option = searchPackID,
+											}),
+											create_option_cycle({
+												label = "AutoReroll Pack Shop Slot",
+												scale = 0.8,
+												w = 3.8,
+												options = searchPackSlotKeys,
+												opt_callback = "change_search_pack_slot",
+												current_option = Brainstorm.SETTINGS.autoreroll.searchPackShopSlotID or 1,
+											}),
+										},
 									},
-								},
-								{
-									n = G.UIT.C,
-									config = { align = "tl", padding = 0.05 },
-									nodes = {
-										create_option_cycle({
-											label = "Charm Tag/Arcana Pack: Number of Souls",
-											scale = 0.8,
-											w = 3.8,
-											options = {0,1,2},
-											opt_callback = "change_search_soul_count",
-											current_option = Brainstorm.SETTINGS.autoreroll.searchForSoul + 1 or 1,
-										}),
-										create_option_cycle({
-											label = "Soul Card Mode",
-											scale = 0.8,
-											w = 3.8,
-											options = searchSoulCardModeKeys,
-											opt_callback = "change_search_soul_card_mode",
-											current_option = Brainstorm.SETTINGS.autoreroll.searchSoulCardModeID or 1,
-										}),
-										create_option_cycle({
-											label = "Soul Result Target",
-											scale = 0.8,
-											w = 3.8,
-											options = searchSoulResultKeys,
-											opt_callback = "change_search_soul_result",
-											current_option = searchSoulResultID,
-										}),
-										create_option_cycle({
-											label = "Rerolls per Frame",
-											scale = 0.8,
-											w = 3.8,
-											options = seedsPerFrame,
-											opt_callback = "change_seeds_per_frame",
-											current_option = Brainstorm.SETTINGS.autoreroll.seedsPerFrameID or 1,
-										}),
+									{
+										n = G.UIT.C,
+										config = { align = "tl", padding = 0.05 },
+										nodes = {
+											create_option_cycle({
+												label = "Charm Tag/Arcana Pack: Number of Souls",
+												scale = 0.8,
+												w = 3.8,
+												options = {0,1,2},
+												opt_callback = "change_search_soul_count",
+												current_option = Brainstorm.SETTINGS.autoreroll.searchForSoul + 1 or 1,
+											}),
+											create_option_cycle({
+												label = "Soul Card Mode",
+												scale = 0.8,
+												w = 3.8,
+												options = searchSoulCardModeKeys,
+												opt_callback = "change_search_soul_card_mode",
+												current_option = Brainstorm.SETTINGS.autoreroll.searchSoulCardModeID or 1,
+											}),
+											create_option_cycle({
+												label = "Soul Result Target",
+												scale = 0.8,
+												w = 3.8,
+												options = searchSoulResultKeys,
+												opt_callback = "change_search_soul_result",
+												current_option = searchSoulResultID,
+											}),
+											create_option_cycle({
+												label = "Rerolls per Frame",
+												scale = 0.8,
+												w = 3.8,
+												options = seedsPerFrame,
+												opt_callback = "change_seeds_per_frame",
+												current_option = Brainstorm.SETTINGS.autoreroll.seedsPerFrameID or 1,
+											}),
+										},
 									},
 								},
 							},
 						},
-					},
-				}
-			end,
-			tab_definition_function_args = "Brainstorm",
-		}
+					}
+				end,
+				tab_definition_function_args = "Brainstorm",
+			}
+		end
+		return ct(args)
 	end
-	return ct(args)
+
+	if Brainstorm.safe_call_result then
+		local ok, result = Brainstorm.safe_call_result("create_tabs", create_tabs_impl)
+		if ok then
+			return result
+		end
+		return ct(args)
+	end
+	return create_tabs_impl()
 end
 function saveManagerAlert(text)
 	G.E_MANAGER:add_event(Event({
