@@ -306,20 +306,36 @@ local function get_weighted_shop_booster_pool()
 	return get_fallback_booster_pool()
 end
 
-function Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
+function Brainstorm.build_pack_prediction_context()
+	local pool = get_weighted_shop_booster_pool()
+	if not pool or #pool == 0 then
+		return nil
+	end
+	local ante = (G and G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante) or 1
+	return {
+		pool = pool,
+		shop_pack_seed_key = "shop_pack" .. tostring(ante),
+		forced_first_buffoon = G and G.GAME and (not G.GAME.first_shop_buffoon) and not key_is_banned("p_buffoon_normal_1"),
+	}
+end
+
+function Brainstorm.predict_booster_from_seed(seed_found, pack_slot, prediction_context)
 	local slot = tonumber(pack_slot) or 1
 	if slot < 1 or slot > 2 then
 		slot = 1
 	end
 
-	local pool = get_weighted_shop_booster_pool()
+	local context = prediction_context or Brainstorm.build_pack_prediction_context()
+	if not context then
+		return {}
+	end
+	local pool = context.pool
 	if not pool or #pool == 0 then
 		return {}
 	end
 
-	local ante = (G and G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante) or 1
-	local shop_pack_seed_key = "shop_pack" .. tostring(ante)
-	local forced_first_buffoon = G and G.GAME and (not G.GAME.first_shop_buffoon) and not key_is_banned("p_buffoon_normal_1")
+	local shop_pack_seed_key = context.shop_pack_seed_key
+	local forced_first_buffoon = context.forced_first_buffoon
 
 	-- Vanilla/SMODS `get_pack('shop_pack')` short-circuits first call of a run to Buffoon.
 	-- The second slot then consumes the *first* weighted shop_pack roll.
@@ -360,54 +376,120 @@ function FastReroll()
 end
 
 local function auto_reroll_impl()
+	local settings = Brainstorm.SETTINGS.autoreroll
+	local seeds_per_frame = tonumber(settings.seedsPerFrame) or 1000
+	local search_tag = settings.searchTag or ""
+	local search_voucher = settings.searchVoucher or ""
+	local search_for_soul = tonumber(settings.searchForSoul) or 0
+	local soul_mode = settings.searchSoulCardMode or "soul_only"
+	local target_legendary = settings.searchSoulResult or ""
+	local match_specific_legendary = target_legendary ~= "" and soul_mode ~= "gateway_only"
+	local has_tag_filter = search_tag ~= ""
+	local has_voucher_filter = search_voucher ~= ""
+	local has_soul_filter = search_for_soul > 0
+
+	local pack_slot = tonumber(settings.searchPackShopSlot) or 1
+	if pack_slot < 1 or pack_slot > 2 then
+		pack_slot = 1
+	end
+	local search_pack = settings.searchPack
+	if type(search_pack) == "string" then
+		search_pack = {search_pack}
+	end
+	local has_pack_filter = type(search_pack) == "table" and #search_pack > 0
+	local selected_pack_keys = nil
+	local pack_prediction_context = nil
+	if has_pack_filter then
+		selected_pack_keys = {}
+		for i = 1, #search_pack do
+			local key = search_pack[i]
+			if key and not key_is_banned(key) then
+				selected_pack_keys[key] = true
+			end
+		end
+		if next(selected_pack_keys) == nil then
+			return nil
+		end
+		pack_prediction_context = Brainstorm.build_pack_prediction_context()
+		if not pack_prediction_context then
+			return nil
+		end
+		if
+			pack_slot == 1
+			and pack_prediction_context.forced_first_buffoon
+			and not selected_pack_keys["p_buffoon_normal_1"]
+			and not selected_pack_keys["p_buffoon_normal_2"]
+		then
+			return nil
+		end
+	end
+
+	if has_tag_filter and key_is_banned(search_tag) then
+		return nil
+	end
+	if has_voucher_filter and key_is_banned(search_voucher) then
+		return nil
+	end
+
 	local rerollsThisFrame = 0
 	-- This part is meant to mimic how Balatro rerolls for Gold Stake
 	local extra_num = -0.561892350821
 	local seed_found = nil
-	while not seed_found and rerollsThisFrame < Brainstorm.SETTINGS.autoreroll.seedsPerFrame do
+	local cursor_hover = G and G.CONTROLLER and G.CONTROLLER.cursor_hover and G.CONTROLLER.cursor_hover.T
+	local cursor_seed_offset = 0
+	if cursor_hover then
+		cursor_seed_offset = cursor_hover.x * 0.33411983 + cursor_hover.y * 0.874146 + 0.412311010 * cursor_hover.time
+	end
+	local random_string_fn = random_string
+	local pseudohash_fn = pseudohash
+	local predict_tag_from_seed = Brainstorm.predict_tag_from_seed
+	local predict_voucher_from_seed = Brainstorm.predict_voucher_from_seed
+	local predict_booster_from_seed = Brainstorm.predict_booster_from_seed
+	local predict_legendary_from_soul = Brainstorm.predict_legendary_from_soul
+	local pseudoseed_from_state = Brainstorm.pseudoseed
+
+	while not seed_found and rerollsThisFrame < seeds_per_frame do
 		rerollsThisFrame = rerollsThisFrame + 1
 		extra_num = extra_num + 0.561892350821
-		seed_found = random_string(
-			8,
-			extra_num
-				+ G.CONTROLLER.cursor_hover.T.x * 0.33411983
-				+ G.CONTROLLER.cursor_hover.T.y * 0.874146
-				+ 0.412311010 * G.CONTROLLER.cursor_hover.time
-		)
+		seed_found = random_string_fn(8, extra_num + cursor_seed_offset)
 		Brainstorm.random_state = {
-			hashed_seed = pseudohash(seed_found),
+			hashed_seed = pseudohash_fn(seed_found),
 		}
-		if Brainstorm.SETTINGS.autoreroll.searchTag ~= "" then
-			if key_is_banned(Brainstorm.SETTINGS.autoreroll.searchTag) then
+		if has_tag_filter then
+			local predicted_tag = predict_tag_from_seed(seed_found)
+			if predicted_tag ~= search_tag then
 				seed_found = nil
-			else
-				local predicted_tag = Brainstorm.predict_tag_from_seed(seed_found)
-				if predicted_tag ~= Brainstorm.SETTINGS.autoreroll.searchTag then
-					seed_found = nil
-				end
 			end
 		end
-		if seed_found and Brainstorm.SETTINGS.autoreroll.searchVoucher and Brainstorm.SETTINGS.autoreroll.searchVoucher ~= "" then
-			if key_is_banned(Brainstorm.SETTINGS.autoreroll.searchVoucher) then
+		if seed_found and has_voucher_filter then
+			local predicted_voucher = predict_voucher_from_seed(seed_found)
+			if predicted_voucher ~= search_voucher then
 				seed_found = nil
-			else
-				local predicted_voucher = Brainstorm.predict_voucher_from_seed(seed_found)
-				if predicted_voucher ~= Brainstorm.SETTINGS.autoreroll.searchVoucher then
-					seed_found = nil
-				end
 			end
 		end
-		if seed_found and Brainstorm.SETTINGS.autoreroll.searchForSoul then
-			local soul_mode = Brainstorm.SETTINGS.autoreroll.searchSoulCardMode or "soul_only"
-			local target_legendary = Brainstorm.SETTINGS.autoreroll.searchSoulResult or ""
+		if seed_found and has_pack_filter then
+			local predicted_packs = predict_booster_from_seed(seed_found, pack_slot, pack_prediction_context)
+			local pack_found = false
+			for j = 1, #predicted_packs do
+				local predicted_key = predicted_packs[j]
+				if predicted_key and selected_pack_keys[predicted_key] then
+					pack_found = true
+					break
+				end
+			end
+			if not pack_found then
+				seed_found = nil
+			end
+		end
+		if seed_found and has_soul_filter then
 			-- Check if Arcana has The Soul and optionally match Cryptid Gateway logic
-			for i = 1, Brainstorm.SETTINGS.autoreroll.searchForSoul do
+			for i = 1, search_for_soul do
 				local card_found = false
 				for j = 1, 5 do
-					local soul_found = pseudorandom(Brainstorm.pseudoseed("soul_Tarot1" .. seed_found)) > 0.997
+					local soul_found = pseudorandom(pseudoseed_from_state("soul_Tarot1" .. seed_found)) > 0.997
 					local gateway_found = false
 					if soul_mode ~= "soul_only" then
-						gateway_found = pseudorandom(Brainstorm.pseudoseed("soul_Spectral1" .. seed_found)) > 0.997
+						gateway_found = pseudorandom(pseudoseed_from_state("soul_Spectral1" .. seed_found)) > 0.997
 					end
 					if soul_mode == "soul_only" then
 						card_found = soul_found
@@ -417,10 +499,10 @@ local function auto_reroll_impl()
 						card_found = soul_found or gateway_found
 					end
 					if card_found and target_legendary ~= "" then
-						if soul_mode == "gateway_only" then
+						if not match_specific_legendary then
 							card_found = false
 						else
-							local predicted_legendary = Brainstorm.predict_legendary_from_soul(seed_found)
+							local predicted_legendary = predict_legendary_from_soul(seed_found)
 							card_found = predicted_legendary == target_legendary
 						end
 					end
@@ -430,33 +512,6 @@ local function auto_reroll_impl()
 					seed_found = nil
 					break
 				end
-			end
-		end
-		if seed_found and Brainstorm.SETTINGS.autoreroll.searchPack and #Brainstorm.SETTINGS.autoreroll.searchPack > 0 then
-			local selected_pack_keys = Brainstorm.SETTINGS.autoreroll.searchPack
-			if type(selected_pack_keys) == "string" then
-				selected_pack_keys = {selected_pack_keys}
-			end
-			local pack_found = false
-			local pack_slot = tonumber(Brainstorm.SETTINGS.autoreroll.searchPackShopSlot) or 1
-			if pack_slot < 1 or pack_slot > 2 then
-				pack_slot = 1
-			end
-			local predicted_packs = Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
-			if type(predicted_packs) ~= "table" then
-				predicted_packs = {predicted_packs}
-			end
-			for i = 1, #selected_pack_keys do
-				for j = 1, #predicted_packs do
-					if predicted_packs[j] and selected_pack_keys[i] == predicted_packs[j] then
-						pack_found = true
-						break
-					end
-				end
-				if pack_found then break end
-			end
-			if not pack_found then
-				seed_found = nil
 			end
 		end
 		--[[
