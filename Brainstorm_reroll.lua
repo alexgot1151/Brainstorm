@@ -264,8 +264,7 @@ local function weighted_pick_booster(pool, seed_found, pack_slot)
 	if cume <= 0 then
 		return nil
 	end
-	local slot = tonumber(pack_slot) or 1
-	local poll = pseudorandom(Brainstorm.pseudoseed("shop_pack" .. slot .. seed_found)) * cume
+	local poll = pseudorandom(Brainstorm.pseudoseed(pack_slot .. seed_found)) * cume
 	local it = 0
 	for _, entry in ipairs(pool) do
 		it = it + (entry.weight or 1)
@@ -276,26 +275,68 @@ local function weighted_pick_booster(pool, seed_found, pack_slot)
 	return nil
 end
 
-function Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
-	local slot = tonumber(pack_slot) or 1
-	local center = nil
-	-- `get_current_pool` append keys are not standardized for shop slot > 1 across mod stacks.
-	-- Use explicit shop_pack<slot> weighting path for slot 2+ to keep predictions consistent.
-	if slot == 1 then
-		center = predict_pool_center("Booster", nil, nil, "sho", seed_found)
-		if not center then
-			center = predict_pool_center("Booster", nil, nil, nil, seed_found)
+local function get_weighted_shop_booster_pool()
+	if not G then return nil end
+	local pool = {}
+	local source_pool = G.P_CENTER_POOLS and G.P_CENTER_POOLS.Booster
+
+	if source_pool then
+		for _, entry in ipairs(source_pool) do
+			local center = (type(entry) == "table" and entry) or (G.P_CENTERS and G.P_CENTERS[center_to_key(entry)])
+			local key = center_to_key(entry) or (center and center.key)
+			if key then
+				local add = true
+				if SMODS and SMODS.add_to_pool then
+					local res, pool_opts = SMODS.add_to_pool(center or entry)
+					pool_opts = pool_opts or {}
+					add = res and (add or pool_opts.override_base_checks)
+				end
+				if add and not key_is_banned(key) then
+					local weight = (center and center.get_weight and center:get_weight()) or (center and center.weight) or 1
+					pool[#pool + 1] = {key = key, weight = weight}
+				end
+			end
 		end
 	end
-	local key = center_to_key(center)
-	if key then
-		return key
+
+	if #pool > 0 then
+		return pool
 	end
-	local fallback_pool = get_fallback_booster_pool()
-	if fallback_pool and #fallback_pool > 0 then
-		return weighted_pick_booster(fallback_pool, seed_found, slot)
+
+	return get_fallback_booster_pool()
+end
+
+function Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
+	local slot = tonumber(pack_slot) or 1
+	if slot < 1 or slot > 2 then
+		slot = 1
 	end
-	return nil
+
+	local pool = get_weighted_shop_booster_pool()
+	if not pool or #pool == 0 then
+		return {}
+	end
+
+	local ante = (G and G.GAME and G.GAME.round_resets and G.GAME.round_resets.ante) or 1
+	local shop_pack_seed_key = "shop_pack" .. tostring(ante)
+	local forced_first_buffoon = G and G.GAME and (not G.GAME.first_shop_buffoon) and not key_is_banned("p_buffoon_normal_1")
+
+	-- Vanilla/SMODS `get_pack('shop_pack')` short-circuits first call of a run to Buffoon.
+	-- The second slot then consumes the *first* weighted shop_pack roll.
+	if forced_first_buffoon then
+		if slot == 1 then
+			return {"p_buffoon_normal_1", "p_buffoon_normal_2"}
+		end
+		local second_slot_key = weighted_pick_booster(pool, seed_found, shop_pack_seed_key)
+		return second_slot_key and {second_slot_key} or {}
+	end
+
+	local first_slot_key = weighted_pick_booster(pool, seed_found, shop_pack_seed_key)
+	if slot == 1 then
+		return first_slot_key and {first_slot_key} or {}
+	end
+	local second_slot_key = weighted_pick_booster(pool, seed_found, shop_pack_seed_key)
+	return second_slot_key and {second_slot_key} or {}
 end
 
 function FastReroll()
@@ -393,17 +434,26 @@ function Brainstorm.auto_reroll()
 		end
 		if seed_found and Brainstorm.SETTINGS.autoreroll.searchPack and #Brainstorm.SETTINGS.autoreroll.searchPack > 0 then
 			local selected_pack_keys = Brainstorm.SETTINGS.autoreroll.searchPack
+			if type(selected_pack_keys) == "string" then
+				selected_pack_keys = {selected_pack_keys}
+			end
 			local pack_found = false
 			local pack_slot = tonumber(Brainstorm.SETTINGS.autoreroll.searchPackShopSlot) or 1
 			if pack_slot < 1 or pack_slot > 2 then
 				pack_slot = 1
 			end
-			local predicted_pack = Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
+			local predicted_packs = Brainstorm.predict_booster_from_seed(seed_found, pack_slot)
+			if type(predicted_packs) ~= "table" then
+				predicted_packs = {predicted_packs}
+			end
 			for i = 1, #selected_pack_keys do
-				if predicted_pack and selected_pack_keys[i] == predicted_pack then
-					pack_found = true
-					break
+				for j = 1, #predicted_packs do
+					if predicted_packs[j] and selected_pack_keys[i] == predicted_packs[j] then
+						pack_found = true
+						break
+					end
 				end
+				if pack_found then break end
 			end
 			if not pack_found then
 				seed_found = nil
