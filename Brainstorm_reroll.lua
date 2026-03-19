@@ -435,11 +435,12 @@ local function auto_reroll_impl()
 	-- This part is meant to mimic how Balatro rerolls for Gold Stake
 	local extra_num = -0.561892350821
 	local seed_found = nil
-	local cursor_hover = G and G.CONTROLLER and G.CONTROLLER.cursor_hover and G.CONTROLLER.cursor_hover.T
-	local cursor_seed_offset = 0
-	if cursor_hover then
-		cursor_seed_offset = cursor_hover.x * 0.33411983 + cursor_hover.y * 0.874146 + 0.412311010 * cursor_hover.time
-	end
+	local cursor_hover_root = G and G.CONTROLLER and G.CONTROLLER.cursor_hover
+	local cursor_hover_t = cursor_hover_root and cursor_hover_root.T
+	local cursor_x = (cursor_hover_t and cursor_hover_t.x) or 0
+	local cursor_y = (cursor_hover_t and cursor_hover_t.y) or 0
+	local cursor_time = (cursor_hover_root and cursor_hover_root.time) or 0
+	local cursor_seed_offset = cursor_x * 0.33411983 + cursor_y * 0.874146 + 0.412311010 * cursor_time
 	local random_string_fn = random_string
 	local pseudohash_fn = pseudohash
 	local predict_tag_from_seed = Brainstorm.predict_tag_from_seed
