@@ -33,7 +33,7 @@ end
 
 function Brainstorm.log_debug(message, always_print)
 	local stamp = os.date("%Y-%m-%d %H:%M:%S")
-	local line = "[Brainstorm][" .. stamp .. "] " .. tostring(message)
+	local line = "[Brainstorm-Enhanced][" .. stamp .. "] " .. tostring(message)
 	local log_path = Brainstorm.get_debug_log_path()
 	if log_path and Brainstorm.LOGGER.nativefs and Brainstorm.LOGGER.nativefs.append then
 		pcall(Brainstorm.LOGGER.nativefs.append, log_path, line .. "\n")
